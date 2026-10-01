@@ -1,0 +1,30 @@
+{
+  "id": "omaYoutubeDl",
+  "name": "Oma YouTube DL",
+  "description": "Search YouTube, preview streams, download media and playlists, and create subtitles with yt-dlp.",
+  "version": "1.0.0",
+  "author": "Tanvir Rahman",
+  "license": "MIT",
+  "type": "widget",
+  "capabilities": [
+    "dankbar-widget",
+    "youtube-search",
+    "media-download",
+    "subtitles",
+    "ipc"
+  ],
+  "component": "./OmaYoutubeWidget.qml",
+  "settings": "./OmaYoutubeSettings.qml",
+  "icon": "smart_display",
+  "requires_dms": ">=1.6.0",
+  "dependencies": [
+    "yt-dlp",
+    "ffmpeg"
+  ],
+  "permissions": [
+    "settings_read",
+    "settings_write",
+    "process",
+    "network"
+  ]
+}
