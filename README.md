@@ -6,7 +6,7 @@ Search YouTube, preview videos inside the popout when a progressive stream is av
 
 ## Requirements
 
-- Dank Material Shell **1.6.0 or newer**
+- Dank Material Shell **1.6.0 or newer** — verified against the **v1.6.2** stable release and the current **1.7** pre-release (`master`). See [Compatibility](#compatibility).
 - `yt-dlp`
 - `ffmpeg`
 - Qt Multimedia's QML module is optional; it enables embedded playback. If it is missing, the plugin still loads and tries the optional `mpv` audio-preview fallback instead.
@@ -39,17 +39,66 @@ mkdir -p ~/.config/DankMaterialShell/plugins
 git clone https://github.com/TR4842/omayoutube-dl-dms.git ~/.config/DankMaterialShell/plugins/omaYoutubeDl
 ```
 
-Then open **DMS Settings → Plugins**, scan for plugins, enable **Oma YouTube DL**, and add it to the DankBar widget list. Restart DMS if the new widget does not appear immediately:
+Then:
+
+1. Open **DMS Settings → Plugins** and scan for plugins (or run `dms ipc call plugin-scan scan`).
+2. Open **Oma YouTube DL** and switch the plugin **on**. DMS only lists a plugin in the bar widget picker after it has been enabled here.
+3. Go to **Settings → Bar → Widgets** and add **Oma YouTube DL** to the left, center, or right section.
+
+Restart DMS if the new widget does not appear immediately:
 
 ```sh
 dms restart
 ```
 
-For local development, reload after editing:
+### Update
 
 ```sh
+git -C ~/.config/DankMaterialShell/plugins/omaYoutubeDl pull
 dms ipc call plugins reload omaYoutubeDl
 ```
+
+For local development, run the same `reload` command after editing any file in the plugin directory.
+
+## Compatibility
+
+DMS enables a plugin by compiling its main QML component with `Qt.createComponent()`. Any compile error — a syntax error, an import that is not installed, or a property that your DMS version's widgets do not define — makes the enable toggle snap back off, and a plugin that is not enabled never appears in the bar widget picker.
+
+Because of that, this plugin deliberately sticks to the widget API that exists on the **1.6.x** stable release and feature-detects anything newer:
+
+| API | DMS 1.6.2 | DMS 1.7 (master) | How the plugin handles it |
+|---|---|---|---|
+| `DankButton.busy` | missing | present | Not used; the Search button swaps its icon while a search runs. |
+| `Theme.buttonHeightXS/S/M` | missing | present | Read through `root.buttonHeight*` fallbacks (32 / 40 / 48). |
+| `PluginComponent.textSize` | missing | present | Read through `root.pillTextSize`, falls back to `Theme.fontSizeSmall`. |
+| `PluginComponent.interactionActive` | missing | present | Read through `root.popoutInteractionActive`. |
+| `ToastService.showSuccess` | missing | missing | Never existed; the plugin uses `showInfo`. |
+| `QtMultimedia` QML module | optional | optional | Isolated in `OmaYoutubeMediaPlayer.qml` behind a `Loader`, so a missing module only disables embedded preview. |
+
+`tests/model.test.js` asserts that none of the 1.7-only properties are assigned directly, so a future edit cannot silently break 1.6.x again.
+
+## Troubleshooting
+
+**The toggle in Settings → Plugins will not stay on.**
+DMS prints the compile error in red directly under the plugin row on that page. It is also in the shell log:
+
+```sh
+dms kill; dms run 2>&1 | grep -i -A2 "omaYoutubeDl\|component error"
+```
+
+A line like `Cannot assign to non-existent property "xyz"` means your DMS build's widgets differ from the ones this plugin was verified against — please open an issue and paste that line together with your DMS version (shown in **Settings → About**, or `dms version`).
+
+**The plugin is enabled but not in the bar widget list.**
+Open **Settings → Bar → Widgets** and add it manually; enabling a plugin does not place it in the bar automatically. If it is still missing, run `dms ipc call plugins reload omaYoutubeDl` or `dms restart`.
+
+**Searches return nothing or fail with a non-zero exit code.**
+Update `yt-dlp` first (`yt-dlp -U` or your package manager); YouTube changes its player and anti-bot checks frequently. If YouTube asks you to sign in, set a browser in **Cookies passthrough** in the plugin settings.
+
+**Preview shows "QtMultimedia unavailable".**
+Install your distribution's Qt 6 Multimedia QML package (for example `qt6-multimedia` on Arch) and restart DMS. Without it the plugin falls back to an `mpv` audio preview if `mpv` is installed.
+
+**Nothing happens when I press play / pause on the audio preview.**
+Pause control for the `mpv` fallback needs `socat` to talk to mpv's IPC socket.
 
 ## Use
 
@@ -111,7 +160,18 @@ Run the pure-JavaScript helper tests with Node.js:
 node tests/model.test.js
 ```
 
-The helper module keeps yt-dlp argv construction and shell quoting out of the QML UI. Search output is capped at 1 MiB, limited to 50 parsed entries, and has a 30-second process deadline.
+The helper module keeps yt-dlp argv construction and shell quoting out of the QML UI. Search output is capped at 1 MiB, limited to 50 parsed entries, and has a 30-second process deadline. The test file also contains the DMS 1.6.x compatibility guards described under [Compatibility](#compatibility).
+
+To type-check the QML against a specific DMS release without a running shell, clone DMS (with its `dank-qml-common` submodule) and point `qmllint` at a directory containing a `qs` symlink to its `quickshell/` folder:
+
+```sh
+git clone --depth 1 --branch v1.6.2 https://github.com/AvengeMedia/DankMaterialShell.git /tmp/dms
+git -C /tmp/dms submodule update --init --depth 1 dank-qml-common
+mkdir -p /tmp/imp && ln -sfn /tmp/dms/quickshell /tmp/imp/qs
+qmllint -I /tmp/imp --unqualified disable --compiler disable OmaYoutubeWidget.qml 2>&1 | grep missing-property
+```
+
+Quickshell resolves `qs.*` imports by directory, whereas `qmllint` needs a `qmldir` per module; generate simple ones listing each `*.qml` file (and `singleton` for files that start with `pragma Singleton`) in `qs/Common`, `qs/Widgets`, `qs/Services`, `qs/Modules/Plugins`, and `qs/DankCommon/**`. Quickshell's own types (`Process`, `IpcHandler`, …) stay unresolved, which is expected — the useful output is any `missing-property` line pointing at a Dank widget.
 
 ## Attribution and license
 
