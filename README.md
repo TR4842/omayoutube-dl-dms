@@ -1,146 +1,107 @@
-# Oma YouTube DL — Dank Material Shell port
+# Oma YouTube DL
 
-A DMS bar widget rebuilt from [Aznit11/omayoutube-dl](https://github.com/Aznit11/omayoutube-dl), following the `PluginComponent` / `PopoutComponent` architecture used by Dank Material Shell plugins such as [hthienloc/dms-plugins](https://github.com/hthienloc/dms-plugins).
+A DankMaterialShell bar widget for searching YouTube, previewing media, managing `yt-dlp` downloads, and creating subtitle files. It is a standalone DMS plugin built with the documented `PluginComponent` / `PopoutComponent` and `PluginSettings` APIs.
 
-Search YouTube, preview videos inside the popout when a progressive stream is available, queue video/audio downloads and playlists, and optionally create subtitles with native YouTube captions or Whisper.
+- [DMS plugin overview](https://danklinux.com/docs/dankmaterialshell/plugins-overview)
+- [DMS plugin development guide](https://danklinux.com/docs/dankmaterialshell/plugin-development)
+
+## Features
+
+- Search YouTube through `yt-dlp`, with relevance, newest, view-count, short, and long filters.
+- Queue a search result or a pasted video / playlist URL for video or audio-only downloads.
+- Track download progress, cancel the active download, remove queued items, and open the output folder.
+- Preview a compatible stream inside the popout. If the stream cannot play, the plugin tries a cached MP4 and then an optional `mpv` audio fallback.
+- Fetch native YouTube captions as sidecar files or embed them in video downloads.
+- Create subtitles with local Whisper or the OpenAI transcription API.
+- Paste a URL from the clipboard with a right-click on the bar pill, or drop an HTTP(S) URL onto it.
+- Invoke search, download, playback, and transcription through DMS IPC.
+- Save recent activity with DMS's per-plugin state API; the download queue is kept for the current shell session.
 
 ## Requirements
 
-- Dank Material Shell **1.6.0 or newer** — verified against the **v1.6.2** stable release and the current **1.7** pre-release (`master`). See [Compatibility](#compatibility).
-- `yt-dlp`
-- `ffmpeg`
-- Qt Multimedia's QML module is optional; it enables embedded playback. If it is missing, the plugin still loads and tries the optional `mpv` audio-preview fallback instead.
-- `mpv` and `socat` are optional; they provide the audio-preview fallback and pause control when the embedded stream cannot be played.
-- Local Whisper transcription is optional and needs `whisper-cli`, `whisper`, or `whisper-ctranslate2` plus a compatible model.
-- OpenAI transcription is optional and needs `curl` and the configured API-key environment variable.
+- DankMaterialShell **1.6.0 or newer**
+- `yt-dlp` and `ffmpeg` (required)
+- `bash` (used to run safely quoted yt-dlp / transcription scripts)
 
-Check the required tools with:
+Optional features:
+
+- Qt Multimedia's QML module enables embedded video playback. Without it, the plugin still loads and can try the `mpv` audio-preview fallback.
+- `mpv` enables the audio fallback; `socat` enables pause / resume for that fallback.
+- A local Whisper CLI (`whisper-cli`, `whisper`, or `whisper-ctranslate2`) and a compatible model enable private, on-device transcription.
+- `curl` is required only for OpenAI transcription.
+
+Check required dependencies with:
 
 ```sh
 command -v yt-dlp ffmpeg
 ```
 
-On Arch, for example:
+For Arch Linux, for example:
 
 ```sh
 sudo pacman -S yt-dlp ffmpeg
-# Optional: embedded video playback and mpv fallback controls
+# Optional: embedded media and mpv controls
 sudo pacman -S qt6-multimedia mpv socat
 ```
 
-Keep `yt-dlp` current; YouTube frequently changes its player and anti-bot checks.
+Keep `yt-dlp` up to date; YouTube frequently changes its player and anti-bot checks.
 
 ## Install
 
-Clone the repository into DMS's plugin directory (the directory must contain `plugin.json` directly):
+Install the repository as a plugin directory (it must contain `plugin.json` directly):
 
 ```sh
 mkdir -p ~/.config/DankMaterialShell/plugins
-git clone https://github.com/TR4842/omayoutube-dl-dms.git ~/.config/DankMaterialShell/plugins/omaYoutubeDl
+git clone https://github.com/TR4842/omayoutube-dl-dms.git \
+  ~/.config/DankMaterialShell/plugins/omaYoutubeDl
 ```
 
 Then:
 
-1. Open **DMS Settings → Plugins** and scan for plugins (or run `dms ipc call plugin-scan scan`).
-2. Open **Oma YouTube DL** and switch the plugin **on**. DMS only lists a plugin in the bar widget picker after it has been enabled here.
-3. Go to **Settings → Bar → Widgets** and add **Oma YouTube DL** to the left, center, or right section.
+1. Open **Settings → Plugins** and click **Scan for Plugins**.
+2. Enable **Oma YouTube DL**.
+3. Open **Settings → Bar → Widgets** and add it to the left, center, or right section.
+4. Restart DMS if it does not appear: `dms restart`.
 
-Restart DMS if the new widget does not appear immediately:
-
-```sh
-dms restart
-```
-
-### Update
+To update an existing clone:
 
 ```sh
 git -C ~/.config/DankMaterialShell/plugins/omaYoutubeDl pull
 dms ipc call plugins reload omaYoutubeDl
 ```
 
-For local development, run the same `reload` command after editing any file in the plugin directory.
-
-## Compatibility
-
-DMS enables a plugin by compiling its main QML component with `Qt.createComponent()`. Any compile error — a syntax error, an import that is not installed, or a property that your DMS version's widgets do not define — makes the enable toggle snap back off, and a plugin that is not enabled never appears in the bar widget picker.
-
-Because of that, this plugin deliberately sticks to the widget API that exists on the **1.6.x** stable release and feature-detects anything newer:
-
-| API | DMS 1.6.2 | DMS 1.7 (master) | How the plugin handles it |
-|---|---|---|---|
-| `DankButton.busy` | missing | present | Not used; the Search button swaps its icon while a search runs. |
-| `Theme.buttonHeightXS/S/M` | missing | present | Read through `root.buttonHeight*` fallbacks (32 / 40 / 48). |
-| `PluginComponent.textSize` | missing | present | Read through `root.pillTextSize`, falls back to `Theme.fontSizeSmall`. |
-| `PluginComponent.interactionActive` | missing | present | Read through `root.popoutInteractionActive`. |
-| `ToastService.showSuccess` | missing | missing | Never existed; the plugin uses `showInfo`. |
-| `QtMultimedia` QML module | optional | optional | Isolated in `OmaYoutubeMediaPlayer.qml` behind a `Loader`, so a missing module only disables embedded preview. |
-
-`tests/model.test.js` asserts that none of the 1.7-only properties are assigned directly, so a future edit cannot silently break 1.6.x again.
-
-## Troubleshooting
-
-**The toggle in Settings → Plugins will not stay on.**
-DMS prints the compile error in red directly under the plugin row on that page. It is also in the shell log:
-
-```sh
-dms kill; dms run 2>&1 | grep -i -A2 "omaYoutubeDl\|component error"
-```
-
-A line like `Cannot assign to non-existent property "xyz"` means your DMS build's widgets differ from the ones this plugin was verified against — please open an issue and paste that line together with your DMS version (shown in **Settings → About**, or `dms version`).
-
-**The plugin is enabled but not in the bar widget list.**
-Open **Settings → Bar → Widgets** and add it manually; enabling a plugin does not place it in the bar automatically. If it is still missing, run `dms ipc call plugins reload omaYoutubeDl` or `dms restart`.
-
-**Searches return nothing or fail with a non-zero exit code.**
-Update `yt-dlp` first (`yt-dlp -U` or your package manager); YouTube changes its player and anti-bot checks frequently. If YouTube asks you to sign in, set a browser in **Cookies passthrough** in the plugin settings.
-
-**Preview shows "QtMultimedia unavailable".**
-Install your distribution's Qt 6 Multimedia QML package (for example `qt6-multimedia` on Arch) and restart DMS. Without it the plugin falls back to an `mpv` audio preview if `mpv` is installed.
-
-**Nothing happens when I press play / pause on the audio preview.**
-Pause control for the `mpv` fallback needs `socat` to talk to mpv's IPC socket.
-
 ## Use
 
-- **Click the bar pill** to open the popout.
-- **Search** with a YouTube query; the filter supports relevance, newest, most viewed, short, and long results.
-- Select **Video** or **Audio** and click the download action on a result.
-- Paste a direct media URL or playlist URL in the URL field and click **Queue**.
-- Click a result's **play** action for an embedded preview. If yt-dlp cannot resolve a progressive stream, the plugin caches a compatible H.264 MP4 for local in-popout playback; if that fails, it tries an `mpv` audio preview.
-- The **Downloads** tab shows the active progress, waiting queue, recent completions/failures, and a shortcut to the download folder.
-- Click the pill with the **right mouse button** to paste a URL from the clipboard. You can also drop a URL onto the pill.
-- The subtitles action on a result or preview runs Whisper. Configure the engine in **DMS Settings → Plugins → Oma YouTube DL**.
-
-The queue and recent-history list are held in memory for the current shell session; downloaded files and subtitle outputs remain on disk.
+- Click the **YT** bar pill to open the popout.
+- Search for a video and use the result actions to preview, queue a download, or create subtitles.
+- Choose the default download type from **Video** / **Audio** in the Search tab.
+- Paste a video or playlist URL in the URL field and choose **Queue URL**. Playlist behavior is configurable in settings.
+- Use the **Downloads** tab to monitor work, cancel the active item, manage the queue, open the destination folder, and revisit recent activity.
+- Right-click the bar pill to read a URL from the clipboard. Dropping an HTTP(S) URL onto the pill also fills the URL field.
+- Preview playback controls are best-effort because available formats and codec support depend on the source and installed Qt Multimedia / mpv packages.
 
 ## Settings
 
-The DMS settings page includes:
+The DMS plugin settings page lets you configure:
 
-- Download directory, default video/audio mode, max video quality, output container, and extracted audio format.
-- Single-video vs full-playlist downloads.
-- Search result count/filter and optional browser-cookie passthrough to yt-dlp.
-- Preferred audio language/dub, native caption languages, and optional subtitle embedding.
-- Embedded video preview toggle.
-- Whisper engine, language, model, optional custom local command, OpenAI model, and API-key environment variable name.
+- Download directory, default video/audio mode, maximum video quality, output container, audio format, and playlist handling.
+- Search count, default sort filter, optional browser-cookie passthrough, and preferred audio track.
+- Native caption languages, caption embedding, and whether to show the embedded video preview surface.
+- Whisper engine, language, local model / custom command, OpenAI model, and the environment variable name that supplies the API key.
 
-**Privacy:** browser cookies are read locally and passed to yt-dlp. Local Whisper runs on your machine. OpenAI mode uploads the extracted audio to `https://api.openai.com/v1/audio/transcriptions`; use Local mode if you do not want audio to leave your device. The API key itself is not stored in plugin settings—only the name of the environment variable is.
+### Privacy and command execution
 
-Custom Whisper command templates run through `bash` and are intentionally powerful. Only use a command you trust. Available placeholders are `{wav}`, `{input}`, `{dir}`, and `{lang}`.
+Browser cookies are read locally and passed to `yt-dlp`. Local Whisper processes audio on your machine. OpenAI mode uploads the extracted audio to `https://api.openai.com/v1/audio/transcriptions`; use Local mode if the audio must stay on-device. The API key itself is not saved in plugin settings—only its environment variable name is stored.
 
-## Optional: build a Vulkan Whisper CLI
+A custom Whisper command template runs through `bash` with your user permissions. Available placeholders are `{wav}`, `{input}`, `{dir}`, and `{lang}`. Only enter a command you trust. DMS plugins also run with the permissions of the desktop session, so review the source before installing.
 
-The included `setup-whisper-vulkan.sh` builds a user-local `whisper-cli` with Vulkan support and reuses GGML models under `~/.local/share/voxtype/models/` when present:
+## DMS plugin structure
 
-```sh
-~/.config/DankMaterialShell/plugins/omaYoutubeDl/setup-whisper-vulkan.sh
-```
+The manifest declares a `widget` plugin. `OmaYoutubeWidget.qml` is the `PluginComponent` entry point, `OmaYoutubePanel.qml` supplies its `PopoutComponent`, and `OmaYoutubeSettings.qml` uses DMS's `PluginSettings` and setting controls. The plugin host injects `pluginId`, `pluginService`, and `pluginData`; the runtime controller uses the injected service for settings and plugin state. `OmaYoutubeMediaPlayer.qml` is isolated behind a `Loader` so an absent optional Qt Multimedia module cannot prevent activation.
 
-It requires `git`, CMake, Ninja, Vulkan headers/runtime, and `glslc`; it does not use `sudo`. The script builds upstream whisper.cpp from its current default branch, so review it before running if you want a pinned/reproducible build.
+The manifest declares `settings_read`, `settings_write`, `process`, and `network` permissions and lists `yt-dlp` / `ffmpeg` as dependencies. The panel has an **Optional tools → Check** action for the optional playback and transcription tools.
 
 ## IPC
-
-The widget exposes DMS IPC commands:
 
 ```sh
 dms ipc call omaYoutubeDl toggle
@@ -152,29 +113,33 @@ dms ipc call omaYoutubeDl play "https://www.youtube.com/watch?v=VIDEO_ID"
 dms ipc call omaYoutubeDl transcribe "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-## Development / checks
+## Development and checks
 
-Run the pure-JavaScript helper tests with Node.js:
+For IDE completion and live testing, follow the [DMS plugin development guide](https://danklinux.com/docs/dankmaterialshell/plugin-development#development-environment). Symlink this repository into `~/.config/DankMaterialShell/plugins/omaYoutubeDl`, then reload after edits:
+
+```sh
+dms ipc call plugins reload omaYoutubeDl
+```
+
+Run the dependency-free helper and manifest checks with Node.js:
 
 ```sh
 node tests/model.test.js
+jq -e . plugin.json >/dev/null
 ```
 
-The helper module keeps yt-dlp argv construction and shell quoting out of the QML UI. Search output is capped at 1 MiB, limited to 50 parsed entries, and has a 30-second process deadline. The test file also contains the DMS 1.6.x compatibility guards described under [Compatibility](#compatibility).
+The tests cover search parsing, URL validation, command construction and quoting, generated shell syntax, manifest paths / permissions, and the separation of optional Qt Multimedia from the main plugin component. A full QML runtime check requires a DMS / Quickshell development environment.
 
-To type-check the QML against a specific DMS release without a running shell, clone DMS (with its `dank-qml-common` submodule) and point `qmllint` at a directory containing a `qs` symlink to its `quickshell/` folder:
+## Optional: build a Vulkan Whisper CLI
+
+`setup-whisper-vulkan.sh` builds a user-local `whisper-cli` with Vulkan support and reuses GGML models under `~/.local/share/voxtype/models/` when available:
 
 ```sh
-git clone --depth 1 --branch v1.6.2 https://github.com/AvengeMedia/DankMaterialShell.git /tmp/dms
-git -C /tmp/dms submodule update --init --depth 1 dank-qml-common
-mkdir -p /tmp/imp && ln -sfn /tmp/dms/quickshell /tmp/imp/qs
-qmllint -I /tmp/imp --unqualified disable --compiler disable OmaYoutubeWidget.qml 2>&1 | grep missing-property
+./setup-whisper-vulkan.sh
 ```
 
-Quickshell resolves `qs.*` imports by directory, whereas `qmllint` needs a `qmldir` per module; generate simple ones listing each `*.qml` file (and `singleton` for files that start with `pragma Singleton`) in `qs/Common`, `qs/Widgets`, `qs/Services`, `qs/Modules/Plugins`, and `qs/DankCommon/**`. Quickshell's own types (`Process`, `IpcHandler`, …) stay unresolved, which is expected — the useful output is any `missing-property` line pointing at a Dank widget.
+It does not use `sudo`; it requires Git, CMake, Ninja, Vulkan headers / runtime, and `glslc`. The script clones the current upstream whisper.cpp default branch rather than a pinned revision, so review it before running if reproducibility matters.
 
 ## Attribution and license
 
-This DMS port is maintained in [TR4842/omayoutube-dl-dms](https://github.com/TR4842/omayoutube-dl-dms) and is based on the MIT-licensed [OmaYoutube-dl](https://github.com/Aznit11/omayoutube-dl) by Aznit11. It retains the upstream yt-dlp command builders, search parsing, and optional Whisper workflow, and adds the Dank Material Shell manifest, bar pill/popout, PluginService-backed settings, and IPC interface. Both the port copyright and upstream MIT notice are retained in [LICENSE](./LICENSE).
-
-The optional setup script builds the upstream `whisper.cpp` project and remains subject to that project's license.
+This DMS plugin is maintained in [TR4842/omayoutube-dl-dms](https://github.com/TR4842/omayoutube-dl-dms) and is based on the MIT-licensed [OmaYoutube-dl](https://github.com/Aznit11/omayoutube-dl) by Aznit11. See [LICENSE](./LICENSE) for the license and upstream notice.

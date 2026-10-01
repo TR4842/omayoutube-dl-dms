@@ -4,20 +4,23 @@ import qs.Common
 import qs.Widgets
 import qs.Modules.Plugins
 
+// PluginSettings and its setting controls load/save values through DMS's
+// PluginService. The widget reads the same keys from its injected pluginData.
 PluginSettings {
     id: root
     pluginId: "omaYoutubeDl"
 
     StyledText {
         width: parent.width
-        text: "Oma YouTube"
+        text: "Oma YouTube DL"
         color: Theme.surfaceText
         font.pixelSize: Theme.fontSizeLarge
         font.weight: Font.Bold
     }
+
     StyledText {
         width: parent.width
-        text: "Search YouTube, preview streams, queue yt-dlp downloads, and optionally create subtitles. Settings save automatically."
+        text: "Configure yt-dlp downloads, YouTube search, previews, and optional subtitles. Changes save automatically."
         color: Theme.surfaceVariantText
         font.pixelSize: Theme.fontSizeSmall
         wrapMode: Text.WordWrap
@@ -34,7 +37,7 @@ PluginSettings {
     StringSetting {
         settingKey: "downloadDir"
         label: "Download folder"
-        description: "Supports an absolute path or ~/…"
+        description: "Use an absolute path or a path beginning with ~/"
         placeholder: Quickshell.env("HOME") + "/Videos/Omayoutube"
         defaultValue: Quickshell.env("HOME") + "/Videos/Omayoutube"
     }
@@ -42,7 +45,7 @@ PluginSettings {
     SelectionSetting {
         settingKey: "dlMode"
         label: "Default download type"
-        description: "The Video / Audio buttons in the popout can also switch this quickly."
+        description: "The Search panel also has quick Video and Audio buttons."
         options: [
             { label: "Video", value: "video" },
             { label: "Audio only", value: "audio" }
@@ -72,7 +75,7 @@ PluginSettings {
             { label: "MP4", value: "mp4" },
             { label: "MKV", value: "mkv" },
             { label: "WebM", value: "webm" },
-            { label: "Do not remux", value: "best" }
+            { label: "Keep source container", value: "best" }
         ]
         defaultValue: "mp4"
     }
@@ -80,7 +83,13 @@ PluginSettings {
     SelectionSetting {
         settingKey: "audioFormat"
         label: "Extracted audio format"
-        options: ["mp3", "m4a", "opus", "flac", "wav"]
+        options: [
+            { label: "MP3", value: "mp3" },
+            { label: "M4A", value: "m4a" },
+            { label: "Opus", value: "opus" },
+            { label: "FLAC", value: "flac" },
+            { label: "WAV", value: "wav" }
+        ]
         defaultValue: "mp3"
     }
 
@@ -95,11 +104,16 @@ PluginSettings {
         defaultValue: "single"
     }
 
-    Rectangle { width: parent.width; height: 1; color: Theme.outlineVariant; opacity: 0.45 }
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineVariant
+        opacity: 0.45
+    }
 
     StyledText {
         width: parent.width
-        text: "Search & source options"
+        text: "Search and source options"
         color: Theme.primary
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
@@ -108,7 +122,11 @@ PluginSettings {
     SelectionSetting {
         settingKey: "maxResults"
         label: "Results per search"
-        options: ["5", "10", "15"]
+        options: [
+            { label: "5 results", value: "5" },
+            { label: "10 results", value: "10" },
+            { label: "15 results", value: "15" }
+        ]
         defaultValue: "10"
     }
 
@@ -128,7 +146,7 @@ PluginSettings {
     SelectionSetting {
         settingKey: "cookiesBrowser"
         label: "YouTube browser cookies"
-        description: "Use your browser's local cookie store if YouTube asks you to sign in or confirm you are not a bot. Cookies are read locally by yt-dlp."
+        description: "Use your local browser cookie store if YouTube asks you to sign in. Cookies stay on this machine and are passed directly to yt-dlp."
         options: [
             { label: "Off", value: "off" },
             { label: "Chromium", value: "chromium" },
@@ -145,10 +163,10 @@ PluginSettings {
     SelectionSetting {
         settingKey: "audioLang"
         label: "Preferred YouTube audio track"
-        description: "A dub may not exist for every video; yt-dlp falls back to the best available audio. Multi-track downloads use MKV."
+        description: "A requested dub falls back to the best available track. Multiple tracks are saved in MKV."
         options: [
             { label: "Original / best", value: "original" },
-            { label: "Portuguese dub (fallback to original)", value: "pt" },
+            { label: "Portuguese dub, then original", value: "pt" },
             { label: "Original + Portuguese", value: "original+pt" },
             { label: "Portuguese + English", value: "pt+en" }
         ]
@@ -157,8 +175,8 @@ PluginSettings {
 
     SelectionSetting {
         settingKey: "subLangs"
-        label: "Native captions"
-        description: "Downloads YouTube captions or auto-translated captions; does not require Whisper."
+        label: "Native YouTube captions"
+        description: "Fetches creator captions or YouTube auto-captions; this is separate from Whisper transcription."
         options: [
             { label: "Off", value: "off" },
             { label: "Portuguese", value: "pt,pt-BR,pt-PT" },
@@ -170,19 +188,24 @@ PluginSettings {
 
     ToggleSetting {
         settingKey: "embedSubs"
-        label: "Embed native captions"
-        description: "When enabled, video and captions are muxed into MKV; otherwise captions are written as sidecar SRT files."
+        label: "Embed native captions in video"
+        description: "Mux captions into MKV instead of writing sidecar subtitle files."
         defaultValue: false
     }
 
     ToggleSetting {
         settingKey: "showVideo"
-        label: "Show video in preview card"
-        description: "Turn off the embedded video surface if you only want audio-style playback controls."
+        label: "Show video preview surface"
+        description: "Disable the in-popout video area if you only need audio-style preview controls."
         defaultValue: true
     }
 
-    Rectangle { width: parent.width; height: 1; color: Theme.outlineVariant; opacity: 0.45 }
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineVariant
+        opacity: 0.45
+    }
 
     StyledText {
         width: parent.width
@@ -206,7 +229,7 @@ PluginSettings {
     SelectionSetting {
         settingKey: "whisperLang"
         label: "Transcription language"
-        description: "Used by local Whisper and as a hint for the audio track download."
+        description: "Select Auto detect or a language code for Whisper."
         options: [
             { label: "Auto detect", value: "auto" },
             { label: "Portuguese", value: "pt" },
@@ -228,7 +251,7 @@ PluginSettings {
             { label: "Auto", value: "auto" },
             { label: "Small · faster", value: "small" },
             { label: "Medium · balanced", value: "medium" },
-            { label: "Large v3 Turbo · best accuracy", value: "large-v3-turbo" }
+            { label: "Large v3 Turbo · more accurate", value: "large-v3-turbo" }
         ]
         defaultValue: "medium"
     }
@@ -236,7 +259,7 @@ PluginSettings {
     StringSetting {
         settingKey: "whisperCmd"
         label: "Custom local Whisper command"
-        description: "Use auto to detect whisper-cli / whisper. Custom templates run through bash; placeholders: {wav}, {input}, {dir}, {lang}. Only enter commands you trust."
+        description: "Set auto to detect a CLI. Custom templates run through bash; placeholders: {wav}, {input}, {dir}, {lang}. Only use commands you trust."
         placeholder: "auto"
         defaultValue: "auto"
     }
@@ -254,17 +277,22 @@ PluginSettings {
 
     StringSetting {
         settingKey: "whisperKeyEnv"
-        label: "Environment variable name for API key"
-        description: "The key itself is never stored here. Set this environment variable before starting DMS. OpenAI mode uploads the extracted audio to api.openai.com; Local mode keeps it on this machine."
+        label: "API-key environment variable name"
+        description: "Store the key in your environment, not plugin settings. OpenAI mode uploads audio to api.openai.com; Local mode keeps it on your machine."
         placeholder: "OPENAI_API_KEY"
         defaultValue: "OPENAI_API_KEY"
     }
 
-    Rectangle { width: parent.width; height: 1; color: Theme.outlineVariant; opacity: 0.45 }
+    Rectangle {
+        width: parent.width
+        height: 1
+        color: Theme.outlineVariant
+        opacity: 0.45
+    }
 
     StyledText {
         width: parent.width
-        text: "Requirements: yt-dlp and ffmpeg. mpv + socat enable the audio fallback player controls. whisper-cli (or whisper) is optional and needed only for local transcription."
+        text: "Required: yt-dlp and ffmpeg. Optional: Qt Multimedia for embedded video, mpv for audio fallback, socat for mpv pause control, and a Whisper CLI for local transcription."
         color: Theme.surfaceVariantText
         font.pixelSize: Theme.fontSizeSmall
         wrapMode: Text.WordWrap

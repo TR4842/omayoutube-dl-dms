@@ -1,16 +1,43 @@
 // OmaYoutube-dl helpers: parsing + command builders. Pure JS, no Qt deps.
 
-// Must match Panel.qml searchMaxBytes: hard cap on untrusted yt-dlp -J
-// output. Panel.qml kills the provider process above this size and rejects
-// before parsing; this guard is defense-in-depth for direct callers/tests.
+// Must match OmaYoutubeController.qml searchMaxBytes: hard cap on untrusted
+// yt-dlp -J output. The controller stops the provider process above this size;
+// this guard is defense-in-depth for direct callers and tests.
 var SEARCH_MAX_BYTES = 1048576;
 var SEARCH_MAX_ENTRIES = 50;
+
+// Keep URL checks and UTF-8 accounting in this dependency-free module so the
+// UI and tests use the same rules.
+function isHttpUrl(value) {
+  var url = String(value || "").trim();
+  if (!url || url.length > 4096 || /[\s\x00-\x1f"<>]/.test(url)) return false;
+  var match = /^https?:\/\/([^/?#]+)(?:[/?#][^\s]*)?$/i.exec(url);
+  return !!match && match[1].length > 0 && match[1].length <= 255;
+}
+
+function utf8ByteLength(value) {
+  var text = String(value || "");
+  var bytes = 0;
+  for (var i = 0; i < text.length; ++i) {
+    var code = text.charCodeAt(i);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      var next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        ++i;
+      } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 function parseSearchJson(raw) {
   var out = [];
   try {
     var s = String(raw || "");
-    if (s === "" || s.length > SEARCH_MAX_BYTES) return out;
+    if (s === "" || utf8ByteLength(s) > SEARCH_MAX_BYTES) return out;
     var doc = JSON.parse(s);
     var entries = doc.entries || [];
     var n = Math.min(entries.length, SEARCH_MAX_ENTRIES);
@@ -47,12 +74,14 @@ function formatDuration(secs) {
 }
 
 function isPlaylistUrl(url) {
-  return url.indexOf("list=") !== -1;
+  return /[?&]list=[^&#]+/i.test(String(url || ""));
 }
 
 function expandHome(path, home) {
-  if (path && path.charAt(0) === "~") return (home || "") + path.slice(1);
-  return path;
+  var value = String(path || "");
+  if (value === "~") return String(home || "");
+  if (value.indexOf("~/") === 0) return String(home || "") + value.slice(1);
+  return value;
 }
 
 function qualityHeight(quality) {
@@ -162,28 +191,37 @@ function whisperModelOptions() {
 // opts: { url, mode: "video"|"audio", quality, audioFormat, videoFormat,
 //         audioLang, subLangs, embedSubs, outDir, playlist, home }
 function buildDownloadCommand(opts) {
+  opts = opts || {};
+  var mode = opts.mode === "audio" ? "audio" : "video";
   var cmd = ["yt-dlp", "--ignore-config", "--newline", "--progress", "--no-warnings"];
   cmd = cmd.concat(cookiesArgs(opts.cookies));
   var playlist = opts.playlist === "playlist";
   cmd.push(playlist ? "--yes-playlist" : "--no-playlist");
 
-  var audioLang = String(opts.audioLang || "original");
+  var requestedAudioLang = String(opts.audioLang || "original");
+  var audioLang = ["original", "pt", "original+pt", "pt+en"].indexOf(requestedAudioLang) >= 0
+    ? requestedAudioLang : "original";
   var multiAudio = audioLang.indexOf("+") !== -1;
-  var subLangs = String(opts.subLangs || "off");
-  var wantSubs = subLangs !== "" && subLangs !== "off";
+  var requestedSubs = String(opts.subLangs || "off");
+  var allowedSubs = ["off", "pt,pt-BR,pt-PT", "pt,pt-BR,pt-PT,en", "all"];
+  var subLangs = allowedSubs.indexOf(requestedSubs) >= 0 ? requestedSubs : "off";
+  var wantSubs = subLangs !== "off";
   // Subtitles can only be embedded in a video container, never in an
   // extracted audio file (which gets a sidecar .srt instead).
-  var embedSubs = opts.embedSubs === true && opts.mode !== "audio";
+  var embedSubs = opts.embedSubs === true && mode !== "audio";
 
   var outDir = expandHome(opts.outDir || "~/Videos/Omayoutube", opts.home);
   var template = outDir + "/%(title)s [%(id)s].%(ext)s";
   if (playlist) template = outDir + "/%(playlist_title)s/%(playlist_index)s - %(title)s [%(id)s].%(ext)s";
   cmd.push("-o", template);
 
-  var container = opts.videoFormat || "mp4";
+  var container = String(opts.videoFormat || "mp4");
+  if (["mp4", "mkv", "webm", "best"].indexOf(container) < 0) container = "mp4";
+  var audioFormat = String(opts.audioFormat || "mp3");
+  if (["mp3", "m4a", "opus", "flac", "wav"].indexOf(audioFormat) < 0) audioFormat = "mp3";
 
-  if (opts.mode === "audio") {
-    cmd.push("-x", "--audio-format", opts.audioFormat || "mp3");
+  if (mode === "audio") {
+    cmd.push("-x", "--audio-format", audioFormat);
     cmd.push("-f", audioFormatFor(audioLang));
   } else {
     cmd.push("-f", videoFormatFor(opts.quality || "1080", audioLang));
@@ -207,7 +245,9 @@ function buildDownloadCommand(opts) {
     if (embedSubs) cmd.push("--embed-subs");
   }
 
-  cmd.push(opts.url);
+  // A final option terminator makes even a manually-entered URL that starts
+  // with a dash unambiguous to yt-dlp.
+  cmd.push("--", String(opts.url || ""));
   return cmd;
 }
 
@@ -267,7 +307,7 @@ function buildTranscribeScript(opts) {
   var dlSel = (lang !== "auto") ? "ba[language^=" + lang + "]/ba" : "ba";
   var dlArgs = ["yt-dlp", "--ignore-config", "--no-playlist", "--socket-timeout", "30", "-f", dlSel,
     "-x", "--audio-format", "m4a", "-o", base + ".%(ext)s"].concat(cookiesArgs(opts.cookies));
-  dlArgs.push(url);
+  dlArgs.push("--", url);
   var dlQuoted = [];
   for (var di = 0; di < dlArgs.length; ++di) dlQuoted.push(shellQuote(dlArgs[di]));
   L.push(dlQuoted.join(" ") + " 2>&1 | grep -E '\\[download\\]|[Ee]rror' || true");
@@ -374,11 +414,11 @@ function fmtTime(ms) {
 // Extract a YouTube video id from watch/shorts/share URLs.
 function extractId(url) {
   var u = String(url || "");
-  var m = /[?&]v=([A-Za-z0-9_-]{6,})/.exec(u);
+  var m = /[?&]v=([A-Za-z0-9_-]{6,32})(?=$|[&#])/.exec(u);
   if (m) return m[1];
-  m = /youtu\.be\/([A-Za-z0-9_-]{6,})/.exec(u);
+  m = /youtu\.be\/([A-Za-z0-9_-]{6,32})(?=$|[/?#])/.exec(u);
   if (m) return m[1];
-  m = /\/(shorts|live|embed)\/([A-Za-z0-9_-]{6,})/.exec(u);
+  m = /\/(shorts|live|embed)\/([A-Za-z0-9_-]{6,32})(?=$|[/?#])/.exec(u);
   if (m) return m[2];
   return "";
 }
@@ -388,7 +428,15 @@ function cacheDir(home) {
 }
 
 function cacheFileFor(id, home) {
-  return cacheDir(home) + "/watch-" + (id || "video") + ".mp4";
+  var safeId = /^[A-Za-z0-9_-]{1,64}$/.test(String(id || "")) ? String(id) : "video";
+  return cacheDir(home) + "/watch-" + safeId + ".mp4";
+}
+
+// Encode each local path segment for QMediaPlayer while preserving slashes.
+function fileUrl(path) {
+  var parts = String(path || "").split("/");
+  for (var i = 0; i < parts.length; ++i) parts[i] = encodeURIComponent(parts[i]);
+  return "file://" + parts.join("/");
 }
 
 // Cache script: download+merge to a local mp4 so the embedded player can
@@ -400,7 +448,7 @@ function buildCacheScript(url, file, cookies) {
   var args = ["yt-dlp", "--ignore-config", "--newline", "--progress", "--no-warnings", "--no-playlist",
     "-f", "bv*[vcodec^=avc1][height<=720]+ba/b[vcodec^=avc1][height<=720]/bv*[height<=720]+ba/b[height<=720]",
     "--remux-video", "mp4", "--force-overwrites", "-o", file].concat(cookiesArgs(cookies));
-  args.push(url);
+  args.push("--", url);
   var quoted = [];
   for (var i = 0; i < args.length; ++i) quoted.push(shellQuote(args[i]));
   return "mkdir -p " + shellQuote(dir) + " && exec " + quoted.join(" ") + " 2>&1";
