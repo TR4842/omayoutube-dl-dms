@@ -51,6 +51,16 @@ For local development, reload after editing:
 dms ipc call plugins reload omaYoutubeDl
 ```
 
+### Troubleshooting: the toggle will not stay on
+
+DMS enables a plugin by compiling its main QML component. If that compile fails for any reason (a syntax error, or a property that your DMS version's widgets do not have), the toggle snaps back off and DMS shows the reason in red directly under the plugin row in **Settings → Plugins → Oma YouTube DL**. You can also see it in the shell log:
+
+```sh
+dms kill; dms run 2>&1 | grep -i -A2 "omaYoutubeDl\|component error"
+```
+
+The plugin is written against the DMS **1.6.x** stable widget API and also runs on 1.7 pre-releases. If you are on a newer DMS and see a `Cannot assign to non-existent property` error, please open an issue with that line.
+
 ## Use
 
 - **Click the bar pill** to open the popout.

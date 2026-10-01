@@ -16,6 +16,19 @@ assert.match(widgetQml, /source:\s*Qt\.resolvedUrl\("\.\/OmaYoutubeMediaPlayer\.
 assert.match(mediaPlayerQml, /^import QtMultimedia\s*$/m,
   "the isolated media helper should declare the QtMultimedia dependency it uses");
 
+// DMS 1.6.x compatibility: assigning a property that a DMS widget does not
+// define is a QML *compile* error, which makes PluginService.loadPlugin fail
+// and leaves the plugin impossible to enable from Settings. Guard the APIs
+// that only exist on DMS 1.7+ so they are never assigned directly.
+assert.doesNotMatch(widgetQml, /^\s*busy\s*:/m,
+  "DankButton.busy does not exist on DMS 1.6.x; assigning it prevents the plugin from loading");
+assert.doesNotMatch(widgetQml, /buttonHeight:\s*Theme\.buttonHeight/,
+  "Theme.buttonHeight* is 1.7-only; go through the root fallbacks (root.buttonHeight*)");
+assert.doesNotMatch(widgetQml, /font\.pixelSize:\s*root\.textSize\b/,
+  "PluginComponent.textSize is 1.7-only; use root.pillTextSize");
+assert.doesNotMatch(widgetQml, /ToastService\.showSuccess/,
+  "ToastService has no showSuccess in any DMS release (use showInfo); the TypeError would abort finishDownload");
+
 const Model = {};
 vm.createContext(Model);
 vm.runInContext(source, Model, { filename: "Model.js" });

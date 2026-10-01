@@ -66,6 +66,28 @@ PluginComponent {
     readonly property int searchTimeoutMs: 30000
     readonly property int queuedCount: queueModel.count
 
+    // Compatibility shims. DMS 1.6.x (the current stable release) does not
+    // define Theme.buttonHeight*, PluginComponent.textSize or
+    // PluginComponent.interactionActive; they only exist on 1.7+. Referencing
+    // a missing property through a binding yields `undefined`, which Qt then
+    // refuses to assign to int/real properties, so resolve safe fallbacks once.
+    readonly property int buttonHeightM: typeof Theme.buttonHeightM === "number" ? Theme.buttonHeightM : 48
+    readonly property int buttonHeightS: typeof Theme.buttonHeightS === "number" ? Theme.buttonHeightS : 40
+    readonly property int buttonHeightXS: typeof Theme.buttonHeightXS === "number" ? Theme.buttonHeightXS : 32
+    readonly property int pillTextSize: typeof root.textSize === "number" && root.textSize > 0 ? root.textSize : Theme.fontSizeSmall
+    readonly property bool popoutInteractionActive: root.interactionActive === true
+
+    function notify(title, body) {
+        // DMS ToastService only exposes showInfo/showWarning/showError;
+        // there is no showSuccess in any release.
+        if (typeof ToastService === "undefined" || !ToastService)
+            return;
+        if (typeof ToastService.showInfo === "function")
+            ToastService.showInfo(String(title || ""), String(body || ""));
+        else if (typeof ToastService.showToast === "function")
+            ToastService.showToast(String(title || ""));
+    }
+
     function configuredValue(key, fallback) {
         const value = root.pluginData ? root.pluginData[key] : undefined;
         return value === undefined || value === null || String(value) === "" ? fallback : value;
@@ -142,7 +164,7 @@ PluginComponent {
     }
 
     function openPopout() {
-        if (!root.interactionActive)
+        if (!root.popoutInteractionActive)
             root.triggerPopout();
     }
 
@@ -170,6 +192,7 @@ PluginComponent {
 
     horizontalBarPill: Component {
         Item {
+            id: horizontalPillRoot
             width: pillRow.implicitWidth
             height: pillRow.implicitHeight
             implicitWidth: pillRow.implicitWidth
@@ -182,23 +205,23 @@ PluginComponent {
                 DankIcon {
                     name: root.downloading ? "downloading" : (root.previewPlaying ? "play_circle" : "smart_display")
                     size: root.iconSize
-                    color: parent.parent.draggingOver || root.downloading ? Theme.primary : Theme.surfaceText
+                    color: horizontalPillRoot.draggingOver || root.downloading ? Theme.primary : Theme.surfaceText
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 StyledText {
                     text: root.downloading ? Math.round(root.activePct) + "%" : (root.queuedCount > 0 ? "YT " + root.queuedCount : "YT")
                     color: root.downloading || root.queuedCount > 0 ? Theme.primary : Theme.surfaceText
-                    font.pixelSize: root.textSize
+                    font.pixelSize: root.pillTextSize
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
 
             DropArea {
                 anchors.fill: parent
-                onEntered: parent.draggingOver = true
-                onExited: parent.draggingOver = false
+                onEntered: horizontalPillRoot.draggingOver = true
+                onExited: horizontalPillRoot.draggingOver = false
                 onDropped: drop => {
-                    parent.draggingOver = false;
+                    horizontalPillRoot.draggingOver = false;
                     const text = drop.hasUrls && drop.urls.length > 0 ? drop.urls[0].toString() : (drop.hasText ? drop.text : "");
                     root.acceptPastedText(text);
                 }
@@ -208,6 +231,7 @@ PluginComponent {
 
     verticalBarPill: Component {
         Item {
+            id: verticalPillRoot
             width: Math.max(verticalPillColumn.implicitWidth, root.iconSize)
             height: verticalPillColumn.implicitHeight
             implicitWidth: width
@@ -221,7 +245,7 @@ PluginComponent {
                 DankIcon {
                     name: root.downloading ? "downloading" : (root.previewPlaying ? "play_circle" : "smart_display")
                     size: root.iconSize
-                    color: parent.parent.draggingOver || root.downloading ? Theme.primary : Theme.surfaceText
+                    color: verticalPillRoot.draggingOver || root.downloading ? Theme.primary : Theme.surfaceText
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
                 StyledText {
@@ -234,10 +258,10 @@ PluginComponent {
 
             DropArea {
                 anchors.fill: parent
-                onEntered: parent.draggingOver = true
-                onExited: parent.draggingOver = false
+                onEntered: verticalPillRoot.draggingOver = true
+                onExited: verticalPillRoot.draggingOver = false
                 onDropped: drop => {
-                    parent.draggingOver = false;
+                    verticalPillRoot.draggingOver = false;
                     const text = drop.hasUrls && drop.urls.length > 0 ? drop.urls[0].toString() : (drop.hasText ? drop.text : "");
                     root.acceptPastedText(text);
                 }
@@ -458,8 +482,7 @@ PluginComponent {
             while (historyModel.count > 30)
                 historyModel.remove(historyModel.count - 1);
             root.setStatus("Download complete: “" + title + "”.", false);
-            if (typeof ToastService !== "undefined" && ToastService)
-                ToastService.showSuccess("Download complete", title);
+            root.notify("Download complete", title);
         } else {
             root.activeDetail = String(message || root.activeDetail || "Download failed.").slice(0, 180);
             root.setStatus("Download failed: “" + title + "”. " + root.activeDetail, true);
@@ -809,8 +832,7 @@ PluginComponent {
             while (historyModel.count > 30)
                 historyModel.remove(historyModel.count - 1);
             root.setStatus("Transcription complete: " + root.transcribeDetail, false);
-            if (typeof ToastService !== "undefined" && ToastService)
-                ToastService.showSuccess("Transcription complete", root.transcribeTitle);
+            root.notify("Transcription complete", root.transcribeTitle);
         } else {
             root.setStatus("Transcription failed (exit " + exitCode + "): " + root.transcribeDetail, true);
         }
@@ -1074,7 +1096,7 @@ PluginComponent {
                         width: (parent.width - parent.spacing) / 2
                         text: "Search"
                         iconName: "search"
-                        buttonHeight: Theme.buttonHeightM
+                        buttonHeight: root.buttonHeightM
                         backgroundColor: root.activeTab === "search" ? Theme.primary : Theme.surfaceContainerHigh
                         textColor: root.activeTab === "search" ? Theme.onPrimary : Theme.surfaceText
                         onClicked: root.activeTab = "search"
@@ -1083,7 +1105,7 @@ PluginComponent {
                         width: (parent.width - parent.spacing) / 2
                         text: "Downloads" + (root.downloading ? " · " + Math.round(root.activePct) + "%" : (root.queuedCount > 0 ? " · " + root.queuedCount : ""))
                         iconName: "download"
-                        buttonHeight: Theme.buttonHeightM
+                        buttonHeight: root.buttonHeightM
                         backgroundColor: root.activeTab === "downloads" ? Theme.primary : Theme.surfaceContainerHigh
                         textColor: root.activeTab === "downloads" ? Theme.onPrimary : Theme.surfaceText
                         onClicked: root.activeTab = "downloads"
@@ -1131,10 +1153,12 @@ PluginComponent {
                                     id: searchButton
                                     width: 108
                                     text: root.searching ? "Searching" : "Search"
-                                    iconName: "search"
-                                    busy: root.searching
+                                    // Do not use DankButton.busy here: it only exists on DMS 1.7+,
+                                    // and assigning an unknown property is a compile error that
+                                    // prevents the whole plugin from being enabled on 1.6.x.
+                                    iconName: root.searching ? "hourglass_top" : "search"
                                     enabled: !root.searching
-                                    buttonHeight: Theme.buttonHeightM
+                                    buttonHeight: root.buttonHeightM
                                     backgroundColor: Theme.primary
                                     textColor: Theme.onPrimary
                                     onClicked: root.startSearch()
@@ -1172,7 +1196,7 @@ PluginComponent {
                                 DankButton {
                                     text: "Video"
                                     iconName: "videocam"
-                                    buttonHeight: Theme.buttonHeightXS
+                                    buttonHeight: root.buttonHeightXS
                                     backgroundColor: root.downloadMode === "video" ? Theme.primary : Theme.surfaceContainerHigh
                                     textColor: root.downloadMode === "video" ? Theme.onPrimary : Theme.surfaceText
                                     onClicked: root.saveSetting("dlMode", "video")
@@ -1180,7 +1204,7 @@ PluginComponent {
                                 DankButton {
                                     text: "Audio"
                                     iconName: "headphones"
-                                    buttonHeight: Theme.buttonHeightXS
+                                    buttonHeight: root.buttonHeightXS
                                     backgroundColor: root.downloadMode === "audio" ? Theme.primary : Theme.surfaceContainerHigh
                                     textColor: root.downloadMode === "audio" ? Theme.onPrimary : Theme.surfaceText
                                     onClicked: root.saveSetting("dlMode", "audio")
@@ -1203,7 +1227,7 @@ PluginComponent {
                                     width: 108
                                     text: "Queue"
                                     iconName: "playlist_add"
-                                    buttonHeight: Theme.buttonHeightM
+                                    buttonHeight: root.buttonHeightM
                                     onClicked: root.queueDirectUrl(root.urlDraft)
                                 }
                             }
@@ -1314,20 +1338,20 @@ PluginComponent {
                                         DankButton {
                                             text: root.previewPaused ? "Resume" : "Play / pause"
                                             iconName: root.previewPaused ? "play_arrow" : "pause"
-                                            buttonHeight: Theme.buttonHeightS
+                                            buttonHeight: root.buttonHeightS
                                             enabled: root.videoActive || root.audioFallback
                                             onClicked: root.togglePlayback()
                                         }
                                         DankButton {
                                             text: "Open player"
                                             iconName: "open_in_new"
-                                            buttonHeight: Theme.buttonHeightS
+                                            buttonHeight: root.buttonHeightS
                                             onClicked: root.openCurrentExternal()
                                         }
                                         DankButton {
                                             text: "mpv fullscreen"
                                             iconName: "fullscreen"
-                                            buttonHeight: Theme.buttonHeightS
+                                            buttonHeight: root.buttonHeightS
                                             onClicked: root.openCurrentMpv()
                                         }
                                         DankActionButton {
@@ -1613,7 +1637,7 @@ PluginComponent {
                                     id: folderButton
                                     text: "Folder"
                                     iconName: "folder_open"
-                                    buttonHeight: Theme.buttonHeightXS
+                                    buttonHeight: root.buttonHeightXS
                                     onClicked: root.openDownloadFolder()
                                 }
                                 DankActionButton {
@@ -1702,7 +1726,7 @@ PluginComponent {
                                     id: clearQueueButton
                                     text: "Cancel queue"
                                     iconName: "delete_sweep"
-                                    buttonHeight: Theme.buttonHeightXS
+                                    buttonHeight: root.buttonHeightXS
                                     visible: queueModel.count > 0
                                     textColor: Theme.error
                                     backgroundColor: Theme.withAlpha(Theme.error, 0.12)
@@ -1795,7 +1819,7 @@ PluginComponent {
                                             id: dependencyButton
                                             text: "Check"
                                             iconName: "fact_check"
-                                            buttonHeight: Theme.buttonHeightXS
+                                            buttonHeight: root.buttonHeightXS
                                             onClicked: root.checkDependencies()
                                         }
                                     }
