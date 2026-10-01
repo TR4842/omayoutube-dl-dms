@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtMultimedia
 import Quickshell
 import Quickshell.Io
 import qs.Common
@@ -43,7 +42,11 @@ PluginComponent {
     property bool previewPlaying: false
     property bool previewPaused: false
     property string playerError: ""
+    property var player: null
     property var videoOutputRef: null
+    property bool mediaPlayerUnavailable: false
+    property string pendingEmbeddedSource: ""
+    property string pendingEmbeddedStatus: ""
 
     property bool downloading: false
     property real activePct: 0
@@ -553,12 +556,52 @@ PluginComponent {
             root.startVideoCache();
             return;
         }
+        root.startEmbeddedPlayback(stream, "Playing in the DMS popout: “" + root.nowTitle + "”.");
+    }
+
+    function startEmbeddedPlayback(source, successStatus) {
+        const mediaSource = String(source || "");
+        if (!mediaSource)
+            return;
+
+        if (root.mediaPlayerUnavailable) {
+            root.pendingEmbeddedSource = "";
+            root.pendingEmbeddedStatus = "";
+            root.startAudioFallback();
+            return;
+        }
+
+        if (!root.player) {
+            root.pendingEmbeddedSource = mediaSource;
+            root.pendingEmbeddedStatus = String(successStatus || "");
+            root.videoActive = true;
+            root.audioFallback = false;
+            root.previewPlaying = false;
+            root.previewPaused = false;
+            root.setStatus("Preparing embedded video preview…", false);
+            return;
+        }
+
+        root.pendingEmbeddedSource = "";
+        root.pendingEmbeddedStatus = "";
         root.videoActive = true;
         root.audioFallback = false;
         root.playerError = "";
-        player.source = stream;
-        player.play();
-        root.setStatus("Playing in the DMS popout: “" + root.nowTitle + "”.", false);
+        try {
+            root.player.source = mediaSource;
+            root.player.play();
+            root.setStatus(String(successStatus || "Playing preview."), false);
+        } catch (error) {
+            root.videoActive = false;
+            root.startAudioFallback();
+        }
+    }
+
+    function handleMediaPlayerUnavailable() {
+        root.mediaPlayerUnavailable = true;
+        root.playerError = "Embedded preview is unavailable: the QtMultimedia QML module could not be loaded. Install your distro's Qt Multimedia QML package (qt6-multimedia on Arch).";
+        if (root.pendingEmbeddedSource !== "")
+            root.startAudioFallback();
     }
 
     function startVideoCache() {
@@ -591,12 +634,7 @@ PluginComponent {
             return;
         root.cachingVideo = false;
         if (success) {
-            root.videoActive = true;
-            root.audioFallback = false;
-            root.playerError = "";
-            player.source = "file://" + root.cacheFile;
-            player.play();
-            root.setStatus("Playing cached preview: “" + root.nowTitle + "”.", false);
+            root.startEmbeddedPlayback("file://" + root.cacheFile, "Playing cached preview: “" + root.nowTitle + "”.");
         } else {
             root.cacheDetail = "Video cache failed; trying mpv audio preview.";
             root.startAudioFallback();
@@ -604,14 +642,23 @@ PluginComponent {
     }
 
     function startAudioFallback() {
-        try { player.stop(); player.source = ""; } catch (error) {}
+        root.pendingEmbeddedSource = "";
+        root.pendingEmbeddedStatus = "";
+        try {
+            if (root.player) {
+                root.player.stop();
+                root.player.source = "";
+            }
+        } catch (error) {}
         root.resolving = false;
         root.cachingVideo = false;
         root.videoActive = false;
         root.audioFallback = true;
         root.previewPaused = false;
         root.previewPlaying = true;
-        root.playerError = "Video stream unavailable — using mpv audio preview.";
+        root.playerError = root.mediaPlayerUnavailable
+                ? "QtMultimedia is unavailable — trying mpv audio preview."
+                : "Video stream unavailable — using mpv audio preview.";
         previewProc.command = ["mpv", "--no-video", "--force-window=no", "--no-terminal", "--input-ipc-server=" + root.mpvSocket, "--ytdl-format=bestaudio/best", root.nowUrl];
         previewProc.running = true;
         root.setStatus(root.playerError, false);
@@ -619,10 +666,12 @@ PluginComponent {
 
     function togglePlayback() {
         if (root.videoActive) {
-            if (player.playbackState === MediaPlayer.PlayingState)
-                player.pause();
+            if (!root.player)
+                return;
+            if (root.player.isPlaying)
+                root.player.pause();
             else
-                player.play();
+                root.player.play();
             return;
         }
         if (root.audioFallback && root.previewPlaying) {
@@ -640,8 +689,14 @@ PluginComponent {
             cacheProc.running = false;
         if (previewProc.running)
             previewProc.running = false;
-        try { player.stop(); } catch (error) {}
-        player.source = "";
+        root.pendingEmbeddedSource = "";
+        root.pendingEmbeddedStatus = "";
+        try {
+            if (root.player) {
+                root.player.stop();
+                root.player.source = "";
+            }
+        } catch (error) {}
         root.resolving = false;
         root.cachingVideo = false;
         root.cachePct = 0;
@@ -895,17 +950,44 @@ PluginComponent {
         stderr: StdioCollector { waitForEnd: true }
     }
 
-    MediaPlayer {
-        id: player
-        autoPlay: false
-        audioOutput: AudioOutput {}
-        videoOutput: root.videoOutputRef
-        onPlaybackStateChanged: {
-            root.previewPlaying = playbackState === MediaPlayer.PlayingState || playbackState === MediaPlayer.PausedState;
-            root.previewPaused = playbackState === MediaPlayer.PausedState;
+    // QtMultimedia is optional in Quickshell. Isolate it behind a Loader so a
+    // missing QML module disables embedded preview, not the whole plugin.
+    Loader {
+        id: mediaPlayerLoader
+        active: true
+        source: Qt.resolvedUrl("./OmaYoutubeMediaPlayer.qml")
+        visible: false
+        width: 0
+        height: 0
+
+        onLoaded: {
+            root.player = item;
+            root.mediaPlayerUnavailable = false;
+            if (root.videoOutputRef)
+                item.videoOutput = root.videoOutputRef;
+            if (root.pendingEmbeddedSource !== "")
+                root.startEmbeddedPlayback(root.pendingEmbeddedSource, root.pendingEmbeddedStatus);
         }
-        onErrorOccurred: (error, errorString) => {
-            root.playerError = String(errorString || "Embedded playback failed.").slice(0, 180);
+        onStatusChanged: {
+            if (status === Loader.Error && !root.mediaPlayerUnavailable) {
+                root.player = null;
+                root.handleMediaPlayerUnavailable();
+            }
+        }
+    }
+
+    Connections {
+        target: root.player
+        ignoreUnknownSignals: true
+
+        function onPlaybackStateUpdated() {
+            if (!root.player)
+                return;
+            root.previewPlaying = root.player.isPlaying || root.player.isPaused;
+            root.previewPaused = root.player.isPaused;
+        }
+        function onMediaError(message) {
+            root.playerError = String(message || "Embedded playback failed.").slice(0, 180);
             if (root.nowUrl && !root.audioFallback) {
                 root.videoActive = false;
                 root.startAudioFallback();
@@ -1192,29 +1274,37 @@ PluginComponent {
                                             fillMode: Image.PreserveAspectCrop
                                             asynchronous: true
                                             cache: true
-                                            visible: !player.hasVideo
+                                            visible: !root.player || !root.player.hasVideo
                                             opacity: 0.45
                                         }
-                                        VideoOutput {
-                                            id: embeddedVideoOutput
+                                        Loader {
+                                            id: embeddedVideoOutputLoader
                                             anchors.fill: parent
-                                            fillMode: VideoOutput.PreserveAspectFit
-                                            visible: root.videoActive && player.hasVideo
+                                            sourceComponent: root.player ? root.player.videoOutputComponent : null
+                                            visible: root.videoActive && root.player !== null && root.player.hasVideo
+
+                                            onLoaded: {
+                                                root.videoOutputRef = item;
+                                                if (root.player)
+                                                    root.player.videoOutput = item;
+                                            }
+                                            onItemChanged: {
+                                                if (!item && root.videoOutputRef) {
+                                                    if (root.player && root.player.videoOutput === root.videoOutputRef)
+                                                        root.player.videoOutput = null;
+                                                    root.videoOutputRef = null;
+                                                }
+                                            }
                                         }
                                         StyledText {
                                             anchors.centerIn: parent
-                                            text: root.resolving ? "Resolving stream…" : (root.cachingVideo ? "Caching video · " + Math.round(root.cachePct) + "%\n" + root.cacheDetail : (root.playerError !== "" ? root.playerError : (root.audioFallback ? "Audio preview in mpv" : "")))
+                                            text: root.mediaPlayerUnavailable ? (root.audioFallback ? "QtMultimedia unavailable — using mpv audio preview." : root.playerError) : (root.resolving ? "Resolving stream…" : (root.cachingVideo ? "Caching video · " + Math.round(root.cachePct) + "%\n" + root.cacheDetail : (root.playerError !== "" ? root.playerError : (root.audioFallback ? "Audio preview in mpv" : ""))))
                                             color: "white"
                                             font.pixelSize: Theme.fontSizeSmall
                                             horizontalAlignment: Text.AlignHCenter
                                             wrapMode: Text.WordWrap
                                             width: parent.width - Theme.spacingM * 2
-                                            visible: root.resolving || root.cachingVideo || (!player.hasVideo && (root.playerError !== "" || root.audioFallback))
-                                        }
-                                        Component.onCompleted: root.videoOutputRef = embeddedVideoOutput
-                                        Component.onDestruction: {
-                                            if (root.videoOutputRef === embeddedVideoOutput)
-                                                root.videoOutputRef = null;
+                                            visible: root.mediaPlayerUnavailable || root.resolving || root.cachingVideo || ((!root.player || !root.player.hasVideo) && (root.playerError !== "" || root.audioFallback))
                                         }
                                     }
 
@@ -1255,19 +1345,19 @@ PluginComponent {
                                             id: seekSlider
                                             width: parent.width - seekLabel.implicitWidth - parent.spacing
                                             minimum: 0
-                                            maximum: Math.max(1, player.duration)
-                                            value: root.videoActive ? player.position : 0
+                                            maximum: root.player ? Math.max(1, root.player.duration) : 1
+                                            value: root.videoActive && root.player ? root.player.position : 0
                                             unit: ""
                                             showValue: false
-                                            enabled: root.videoActive && player.duration > 0
+                                            enabled: root.videoActive && root.player !== null && root.player.duration > 0
                                             onSliderDragFinished: value => {
-                                                if (root.videoActive && player.duration > 0)
-                                                    player.position = value;
+                                                if (root.videoActive && root.player && root.player.duration > 0)
+                                                    root.player.position = value;
                                             }
                                         }
                                         StyledText {
                                             id: seekLabel
-                                            text: root.videoActive ? Model.fmtTime(player.position) + " / " + Model.fmtTime(player.duration) : (root.audioFallback ? "mpv audio" : "")
+                                            text: root.videoActive && root.player ? Model.fmtTime(root.player.position) + " / " + Model.fmtTime(root.player.duration) : (root.audioFallback ? "mpv audio" : "")
                                             color: Theme.surfaceVariantText
                                             font.pixelSize: Theme.fontSizeSmall
                                             anchors.verticalCenter: parent.verticalCenter

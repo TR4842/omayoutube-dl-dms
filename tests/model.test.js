@@ -4,7 +4,18 @@ const vm = require("node:vm");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8");
+const repoRoot = path.join(__dirname, "..");
+const source = fs.readFileSync(path.join(repoRoot, "Model.js"), "utf8");
+const widgetQml = fs.readFileSync(path.join(repoRoot, "OmaYoutubeWidget.qml"), "utf8");
+const mediaPlayerQml = fs.readFileSync(path.join(repoRoot, "OmaYoutubeMediaPlayer.qml"), "utf8");
+
+assert.doesNotMatch(widgetQml, /^import QtMultimedia\s*$/m,
+  "the main plugin component must not depend on optional QtMultimedia");
+assert.match(widgetQml, /source:\s*Qt\.resolvedUrl\("\.\/OmaYoutubeMediaPlayer\.qml"\)/,
+  "embedded playback should be loaded separately so the plugin can enable without QtMultimedia");
+assert.match(mediaPlayerQml, /^import QtMultimedia\s*$/m,
+  "the isolated media helper should declare the QtMultimedia dependency it uses");
+
 const Model = {};
 vm.createContext(Model);
 vm.runInContext(source, Model, { filename: "Model.js" });
@@ -101,4 +112,4 @@ assertBashSyntax(Model.buildTranscribeScript({
   home: "/home/test"
 }), "OpenAI transcription script");
 
-console.log("Model.js checks passed.");
+console.log("Model.js and optional-media loading checks passed.");

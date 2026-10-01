@@ -9,6 +9,7 @@ Search YouTube, preview videos inside the popout when a progressive stream is av
 - Dank Material Shell **1.6.0 or newer**
 - `yt-dlp`
 - `ffmpeg`
+- Qt Multimedia's QML module is optional; it enables embedded playback. If it is missing, the plugin still loads and tries the optional `mpv` audio-preview fallback instead.
 - `mpv` and `socat` are optional; they provide the audio-preview fallback and pause control when the embedded stream cannot be played.
 - Local Whisper transcription is optional and needs `whisper-cli`, `whisper`, or `whisper-ctranslate2` plus a compatible model.
 - OpenAI transcription is optional and needs `curl` and the configured API-key environment variable.
@@ -22,7 +23,9 @@ command -v yt-dlp ffmpeg
 On Arch, for example:
 
 ```sh
-sudo pacman -S yt-dlp ffmpeg mpv socat
+sudo pacman -S yt-dlp ffmpeg
+# Optional: embedded video playback and mpv fallback controls
+sudo pacman -S qt6-multimedia mpv socat
 ```
 
 Keep `yt-dlp` current; YouTube frequently changes its player and anti-bot checks.
